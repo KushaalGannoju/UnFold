@@ -1,174 +1,221 @@
-# 🧠 Student Depression Detection — Production ML System
+# 🧠 UnFold — Multimodal Student Mental Health Intelligence & Clinical Coping System
 
-A professional, research-grade machine learning system for detecting depression risk in students, featuring feature contribution analysis, multi-model comparison, hyperparameter tuning, and a modern Streamlit UI.
+<div align="center">
+
+![UnFold Logo](assets/unfold_logo.jpg)
+
+**Dual-Engine Multimodal AI (Tabular GBDT + Clinical RoBERTa + Gemini GenAI Clinical Sentinel)**
+
+*Department of Computer Science & Engineering*
+**Maulana Azad National Institute of Technology (MANIT), Bhopal**
+*Minor Project II — 2026*
+
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![Transformers](https://img.shields.io/badge/Transformers-RoBERTa-FFD21E?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/)
+[![Gemini](https://img.shields.io/badge/Google%20GenAI-Gemini%20Flash-4285F4?style=flat&logo=google&logoColor=white)](https://ai.google.dev/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-UI%203.0-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![License](https://img.shields.io/badge/License-Academic%20Research-blue.svg)](LICENSE)
+
+</div>
 
 ---
 
-## 📁 Project Structure
+## 🌟 Executive Overview
+
+**UnFold** is an advanced multimodal artificial intelligence system designed to detect and triage student depression risk. Standard university mental health screenings typically rely on static numeric questionnaires, which miss the emotional nuance of how students actually communicate their distress.
+
+**UnFold solves this by fusing two complementary AI paradigms into a unified decision engine:**
+1. **Engine A (Tabular ML)**: Analyzes demographic, biometric, and lifestyle indicators (sleep duration, study load, financial stress, CGPA) using tuned Gradient Boosted Decision Trees (GBDT) with local SHAP feature attributions.
+2. **Engine B (Clinical Semantic NLP)**: Evaluates open-ended natural language journal reflections using a fine-tuned clinical transformer (`roberta-base`) trained on **30,000 authentic mental health statements**.
+3. **Multimodal Consensus Engine**: Computes calibrated hybrid risk probabilities ($P_{\text{hybrid}} = 0.45 \cdot P_{\text{tab}} + 0.55 \cdot P_{\text{text}}$), detects clinical concordance/discordance (*Linguistic Masking* vs. *Acute Situational Distress*), and extracts secondary psychiatric comorbidities (High Anxiety, Severe Academic Burnout, Chronic Insomnia, Self-Harm ideation).
+4. **GenAI Clinical Coping Sentinel**: Leverages Google Gemini Flash API with an automatic multi-model failover cascade to synthesize empathetic, Cognitive Behavioral Therapy (CBT) micro-action plans and compile downloadable 1-page **Clinical Counselor Intake Dossiers (PDF)**.
+
+---
+
+## 🔬 Research Performance Benchmarks
+
+| Model Architecture | Modality | Accuracy | Precision | Recall (Depressed) | F1-Score | Status |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **Logistic Regression** | Tabular Only | 78.20% | 79.10% | 80.40% | 79.74% | Minor I Baseline |
+| **Random Forest** | Tabular Only | 82.40% | 83.10% | 85.20% | 84.14% | Minor I Tuned |
+| **Gradient Boosting** | Tabular Only | 84.70% | 85.84% | 88.46% | 87.13% | Minor I Deployed |
+| **Clinical RoBERTa** | Text Only | **86.20%** | **85.77%** | **86.80%** | **86.28%** | **Minor II Engine B** |
+| **⚡ UnFold Hybrid Fusion** | **Tabular + Text** | **88.60%** | **88.10%** | **89.20%** | **88.65%** | **⚡ Flagship Dual-Engine** |
+
+---
+
+## 📁 Repository Structure
 
 ```
-student_depression/
+UnFold/
+├── app/
+│   └── app.py                       ← Streamlit UI 3.0 (Light/Dark mode & Mobile Responsive)
+│
+├── assets/
+│   ├── unfold_logo.jpg              ← Official brand logo (High Resolution)
+│   ├── unfold_logo_white.png        ← Transparent white logo (Dark mode & PDF banner)
+│   ├── unfold_logo_transparent.png  ← Transparent navy logo (Light mode)
+│   └── unfold_icon.png              ← Square brand icon (Favicon & UI badges)
+│
 ├── data/
-│   └── student_depression.csv       ← Kaggle dataset (add here)
+│   ├── student_depression.csv       ← Kaggle Tabular Dataset (27,901 records)
+│   └── Sentimental analysis data.csv← Kaggle NLP Dataset (53,043 records)
+│
+├── docs/
+│   ├── Minor_II_System_Architecture.md ← Comprehensive academic defense document
+│   ├── report_content.md            ← Minor project report draft
+│   └── ppt_content.md               ← Presentation slides script
 │
 ├── models/
-│   └── depression_model.pkl         ← Auto-generated after training
+│   ├── depression_model.pkl         ← Pretrained Tabular GBDT + Scalers + Thresholds
+│   └── roberta_mental_health/       ← Fine-tuned Clinical RoBERTa weights & tokenizer
 │
-├── plots/                           ← Auto-generated training plots
-│   ├── cv_comparison.png
-│   ├── feature_importance.png
-│   ├── confusion_matrix.png
-│   ├── learning_curve.png
-│   ├── cv_distribution.png
-│   └── feature_selection_analysis.png
+├── plots/                           ← Model evaluation curves, confusion matrices & SHAP
+│   ├── roberta_confusion_matrix.png
+│   ├── roberta_evaluation_report.png
+│   └── feature_importance.png
+│
+├── reports/                         ← Auto-generated 1-page Counselor Dossiers (PDF)
+│   └── .gitkeep
 │
 ├── src/
-│   ├── preprocess.py                ← Data loading, cleaning, encoding
-│   ├── train.py                     ← Full training pipeline
-│   ├── predict.py                   ← Inference + feature contribution explanation
-│   └── utils.py                     ← Shared helpers & field definitions
+│   ├── preprocess.py                ← Tabular cleaning & ordinal domain encoding
+│   ├── train.py                     ← Tabular GBDT training & cross-validation
+│   ├── nlp_engine.py                ← RoBERTa inference, token saliency & comorbidity regex
+│   ├── fusion.py                    ← Calibrated hybrid consensus & discordance detection
+│   ├── predict.py                   ← Unified predict_hybrid() API
+│   ├── genai_advisor.py             ← Gemini Flash GenAI advisor with multi-model failover
+│   ├── report_generator.py          ← Professional PDF Clinical Dossier generator
+│   └── utils.py                     ← Shared helper functions & plot paths
 │
-├── app/
-│   └── app.py                       ← Streamlit web application
-│
-├── notebooks/
-│   └── analysis.ipynb               ← Exploratory analysis (optional)
-│
-├── requirements.txt
-└── README.md
+├── .env.example                     ← Template for Gemini API Key configuration
+├── .gitignore                       ← Shields .env, virtualenvs, and OS caches
+├── requirements.txt                 ← Universal dependencies (macOS, Linux, Windows)
+└── README.md                        ← Project overview & deployment documentation
 ```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start Guide
 
-### 1. Install dependencies
+### Option A: macOS / Linux (zsh / bash)
+
 ```bash
+# 1. Clone or navigate into the project directory
+cd UnFold
+
+# 2. Create and activate a Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Upgrade pip and install dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
-```
 
-### 2. Add your dataset
-Place `student_depression.csv` inside the `data/` folder.
+# 4. Optional: set up your Gemini API key (Free at https://aistudio.google.com/)
+cp .env.example .env
+# Edit .env and paste your key: GEMINI_API_KEY=your_key_here
 
-### 3. Train the model
-```bash
-python3 src/train.py
-```
-
-This will:
-- Preprocess data with domain-driven feature selection
-- Tune Gradient Boosting, Random Forest, and Logistic Regression
-- Run 5-Fold Stratified Cross-Validation
-- Compute contribution-based + permutation importance
-- Save model to `models/depression_model.pkl`
-- Save 6 plots to `plots/`
-
-### 4. Launch the Streamlit app
-```bash
+# 5. Launch the Streamlit application
 streamlit run app/app.py
 ```
 
----
+### Option B: Windows (PowerShell)
 
-## 🔬 Feature Selection Rationale
+```powershell
+# 1. Open PowerShell in the project directory
+cd "d:\MInor II\StudentMentalHealth 3.0"
 
-Features were chosen using **three complementary methods**:
+# 2. Create and activate virtual environment
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 
-| Method | Purpose |
-|--------|---------|
-| **Domain reasoning** | Clinical & research-backed relevance |
-| **Mutual Information** | Non-linear statistical dependence with target |
-| **Pearson Correlation** | Linear association screening |
+# 3. Upgrade pip and install requirements
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 
-### ✅ Included Features
+# 4. Set up .env
+copy .env.example .env
+# Edit .env with your Gemini API key
 
-| Feature | Domain Justification |
-|---------|---------------------|
-| Suicidal Thoughts | Strongest direct clinical risk marker |
-| Academic Pressure | Core student stressor — central to mental health research |
-| Financial Stress | Validated non-academic stressor with large effect size |
-| CGPA | Academic performance proxy; low CGPA creates a stress feedback loop |
-| Sleep Duration | Disrupted sleep is both a symptom and cause of depression |
-| Family History | ~40% heritability; genetic + environmental risk |
-| Work/Study Hours | Overwork is a validated burnout predictor |
-| Dietary Habits | Gut-brain axis; poor nutrition impairs mood regulation |
-| Study Satisfaction | Protective factor; dissatisfaction leads to disengagement |
-| Age | Peak onset window: 18–25 (student demographic) |
-| Gender | Documented prevalence differences in clinical literature |
-### ❌ Removed Features
+# 5. Launch the app
+streamlit run app/app.py
+```
 
-| Feature | Reason for Removal |
-|---------|-------------------|
-| ID | Identifier — zero predictive value |
-| City | Too granular; insufficient coverage across cities |
-| Degree | Near-zero variance in a student-specific dataset |
-| Profession | Mostly 'Student'; redundant with the dataset's scope |
+The application will launch in your browser at **`http://localhost:8501`**.
 
 ---
 
-## 🤖 Model Architecture
+## 🌐 Deployment & Git Instructions (For Mac / Deployment Lead)
 
-### Candidates
-- **Gradient Boosting** (baseline + tuned)
-- **Random Forest** (tuned)
-- **Logistic Regression** (tuned)
+This repository is configured for GitHub plus Streamlit Community Cloud. The fine-tuned RoBERTa weights are tracked with Git LFS, which Streamlit Community Cloud supports.
 
-### Tuning
-- `RandomizedSearchCV` with 20 iterations
-- `StratifiedKFold` (5 splits) — preserves class balance in each fold
+### 1. Initialize Git & Safe Push
+The repository already includes a strict `.gitignore` file that prevents `.env` (your private API key) from ever being pushed:
+```bash
+# Configure the intended repository (replaces any old origin URL)
+git remote set-url origin https://github.com/KushaalGannoju/UnFold.git
 
-### Evaluation
-- Accuracy, Precision, Recall, F1-Score
-- Confusion Matrix
-- Learning Curve (bias-variance tradeoff)
+# Ensure the large RoBERTa model is transferred through Git LFS
+git lfs install
 
----
+# Stage project files (.env, generated reports, and caches are ignored)
+git add .
 
-## 📊 Interpretability
+# Verify that .env is NOT staged
+git status
 
-### Feature Importance Methods
+# Commit
+git commit -m "feat: UnFold 4.0 Dual-Engine Mental Health AI with GenAI Sentinel"
 
-1. **GB Native `feature_importances_`** — fast but biased toward high-cardinality features
-2. **Permutation Importance** — model-agnostic, evaluated on held-out test set (more reliable)
-3. **Contribution analysis** — per-sample explanations for the final Gradient Boosting model
+# Push the main branch
+git push -u origin main
+```
 
-> Why academic pressure might be *overestimated* by native importance:
-> Native GB importance counts how often a feature is used for splitting, not how much it actually *affects the outcome*. Permutation and contribution analysis show the true causal picture — suicidal thoughts and financial stress are typically stronger.
-
----
-
-## 🖥️ Streamlit UI Features
-
-| Feature | Detail |
-|---------|--------|
-| Sidebar inputs | Sliders, dropdowns, radio buttons |
-| Colour-coded result | 🟢 Green = Not Depressed, 🔴 Red = Depressed |
-| Confidence score | Predicted class probability (%) |
-| Probability gauge | Both class probabilities displayed |
-| Feature contribution chart | Per-prediction feature contributions |
-| Feature importance | All 3 methods visualised |
-| Model metrics | Accuracy, Precision, Recall, F1, Confusion Matrix |
-| Plots gallery | All training plots embedded in app |
+### 2. Deploy to Streamlit Community Cloud
+1. The existing app at [projectunfold.streamlit.app](https://projectunfold.streamlit.app/) is connected to this repository and branch (`main`). Pushing to `main` triggers a redeploy automatically.
+2. In Streamlit Cloud, confirm the main file path is `app/app.py`.
+3. In **Settings -> Secrets**, add your Gemini API key if you want the live GenAI pathway:
+   ```toml
+   GEMINI_API_KEY = "your_actual_gemini_api_key"
+   ```
+4. The app remains fully functional without a key by using the local clinical fallback.
 
 ---
 
-## 🔮 Future Extensions
+## 🎨 UI Features (Version 3.0)
 
-- **Text-based sentiment analysis**: Add a free-text input field; pass text through a sentiment/NLP model (e.g. `transformers` BERT) and use the score as an additional feature
-- **Longitudinal tracking**: Allow repeated assessments over time to track risk trajectory
-- **Multi-modal**: Integrate sleep tracker / activity data APIs
-- **Federated learning**: Train across institutions without sharing raw student data
-- **Calibration**: Platt scaling / isotonic regression for better-calibrated probabilities
+- **UnFold Brand Identity**: Custom-designed logo mark integrated into the sidebar, main hero header, and generated PDF reports.
+- **Theme-Adaptive (Light & Dark Mode)**: Uses dynamic CSS variables (`var(--secondary-background-color)`, `var(--text-color)`) and glassmorphic card borders so the entire interface seamlessly adapts to system light and dark themes.
+- **Mobile Responsive**: Fully responsive grid layout that gracefully adapts presets, tri-gauge metric cards, and side-by-side explainability charts for phones and tablets.
+- **Explainable AI (XAI)**: Side-by-side local SHAP feature attributions and gradient-based token saliency highlighting verbatim distress words.
+- **1-Page Clinical Counselor Dossier**: Export standardized PDF intake briefs with a single click.
 
 ---
 
-## ⚠️ Disclaimer
+## 👥 Academic Project Team
 
-This tool is intended for **research and educational purposes only**.
+**Department of Computer Science & Engineering**
+**Maulana Azad National Institute of Technology (MANIT), Bhopal**
 
-It is **not a clinical diagnostic instrument** and must not replace professional mental health evaluation. If you or someone you know is at risk, please contact a qualified mental health professional or a crisis helpline.
+- **Project Guides:**
+  - **Dr. R.K. Pateriya**, Professor, Department of CSE
+  - **Dr. Archana Balmik**, Assistant Professor, Department of CSE
 
-**India helplines:**
-- iCall: 9152987821
-- Vandrevala Foundation: 1860-2662-345
-- AASRA: 9820466627
+- **Project Members:**
+  - Himanshu Verma
+  - Kushaal Sai Gannoju
+  - Ritika Rani Ujjainia
+  - Rayyan Zameer Baikadi
+
+---
+
+## ⚖️ Clinical & Ethical Disclaimer
+
+**UnFold is an academic engineering project designed as an educational screening and counseling preparation aid.**
+It is **not a medical diagnostic device** and is not certified to provide clinical diagnoses. It is designed to assist counselors in triage preparation and empower students with proactive, evidence-based coping pathways. If you or someone you know is in immediate crisis, please contact verified 24/7 helplines:
+- **Tele-MANAS (Govt of India):** 14416 / 1800-891-4416 (Toll-Free, 24/7)
+- **iCall (TISS):** 9152987821
+- **Vandrevala Foundation:** 9999 666 555
+- **National Suicide Prevention Lifeline (US):** 988

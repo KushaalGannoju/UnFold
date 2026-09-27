@@ -198,3 +198,49 @@ def explain_prediction(user_inputs: dict,
 
     except Exception:
         return None
+
+
+# ── DUAL-ENGINE HYBRID INFERENCE ─────────────────────────────
+
+def predict_hybrid(
+    tabular_inputs: dict,
+    text_reflection: str = "",
+    alpha_tab: float = 0.45,
+    alpha_text: float = 0.55,
+) -> dict:
+    """
+    Execute end-to-end multimodal inference:
+    Engine A (Tabular GBDT) + Engine B (Clinical NLP RoBERTa) + Fusion.
+    """
+    from nlp_engine import predict_text, detect_comorbid_tags, compute_token_saliency
+    from fusion import fuse_predictions
+
+    # Engine A: Tabular GBDT
+    tab_res = predict(tabular_inputs)
+    tab_contrib = explain_prediction(tabular_inputs)
+
+    # Engine B: Clinical NLP RoBERTa
+    clean_text = (text_reflection or "").strip()
+    text_res = predict_text(clean_text)
+    comorbid_tags = detect_comorbid_tags(clean_text)
+    token_saliency, token_html = compute_token_saliency(clean_text)
+
+    # Multimodal Fusion
+    fusion_res = fuse_predictions(
+        tabular_result=tab_res,
+        text_result=text_res,
+        comorbid_tags=comorbid_tags,
+        user_inputs=tabular_inputs,
+        alpha_tab=alpha_tab,
+        alpha_text=alpha_text,
+    )
+
+    return {
+        "tabular_result": tab_res,
+        "tabular_contrib": tab_contrib,
+        "text_result": text_res,
+        "token_saliency": token_saliency,
+        "token_html": token_html,
+        "comorbid_tags": comorbid_tags,
+        "fusion_result": fusion_res,
+    }

@@ -1,0 +1,2 @@
+# Fine-tuned transformer weights are too large for regular Git objects.
+models/roberta_mental_health/model.safetensors filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,22 @@
+# Python environments and bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Notebook checkpoints and operating-system files
+.ipynb_checkpoints/
+.DS_Store
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Generated counselor dossiers (keep the directory placeholder)
+reports/*.pdf
+!reports/.gitkeep
+
+# Local Streamlit state
+.streamlit/cache/

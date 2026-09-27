@@ -2,6 +2,7 @@
 utils.py
 ─────────────────────────────────────────────────────────────
 Shared utility functions for the Student Depression Detection system.
+Enhanced for Minor II (Multimodal Dual-Engine & GenAI).
 """
 
 import os
@@ -11,6 +12,8 @@ import numpy as np
 
 BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLOTS_DIR = os.path.join(BASE_DIR, 'plots')
+DATA_DIR  = os.path.join(BASE_DIR, 'data')
+MODELS_DIR = os.path.join(BASE_DIR, 'models')
 
 
 def format_feature_name(name: str) -> str:
@@ -43,10 +46,31 @@ def risk_category(prob_dep: float) -> tuple[str, str]:
     Returns (category, emoji).
     """
     if prob_dep < 25:
-        return 'Low Risk',      '🟢'
+        return 'Low Risk',       '🟢'
     elif prob_dep < 50:
-        return 'Moderate Risk', '🟡'
+        return 'Moderate Risk',  '🟡'
     elif prob_dep < 75:
-        return 'High Risk',     '🟠'
+        return 'High Risk',      '🟠'
     else:
-        return 'Very High Risk','🔴'
+        return 'Critical Risk',  '🔴'
+
+
+def risk_color(prob_dep: float) -> str:
+    """Return hex color for a given depression risk probability."""
+    if prob_dep < 25:
+        return '#16a34a'  # Green
+    elif prob_dep < 50:
+        return '#ca8a04'  # Amber
+    elif prob_dep < 75:
+        return '#ea580c'  # Orange
+    else:
+        return '#dc2626'  # Red
+
+
+def format_pct(value) -> str:
+    """Format decimal or float as percentage string."""
+    if value is None:
+        return "N/A"
+    if isinstance(value, (int, float)):
+        return f"{value:.1f}%" if value > 1.0 else f"{value * 100:.1f}%"
+    return str(value)
