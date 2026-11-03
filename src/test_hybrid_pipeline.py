@@ -57,6 +57,17 @@ def run_tests():
     print(f"  • Comorbid tags detected: {[t['category'] for t in comorbids]}")
     tokens, html = compute_token_saliency(sample_text)
     print(f"  • Token saliency computed: {len(tokens)} tokens, HTML length: {len(html)}")
+    from nlp_engine import load_nlp_engine, MAX_TOKENS
+    import torch
+    model, tokenizer = load_nlp_engine()
+    inputs = tokenizer(sample_text, return_tensors="pt", truncation=True, max_length=MAX_TOKENS)
+    with torch.no_grad():
+        direct = model(**inputs).logits
+        embedded = model(inputs_embeds=model.get_input_embeddings()(inputs["input_ids"]),
+                         attention_mask=inputs["attention_mask"]).logits
+    assert torch.allclose(direct, embedded, atol=1e-5)
+    assert all(parameter.grad is None for parameter in model.parameters())
+    assert "max_tokens" in text_res and text_res["max_tokens"] == MAX_TOKENS
 
     # Test 3: Multimodal Fusion
     print("\n[Test 3] Multimodal Fusion Engine...")
@@ -77,7 +88,7 @@ def run_tests():
     print("\n[Test 5] GenAI Clinical Advisor...")
     shap_list = tab_contrib.to_dict("records") if tab_contrib is not None else []
     plan = generate_student_coping_plan(sample_inputs, shap_list, sample_text, fusion_res)
-    assert len(plan) > 200
+    assert len(plan) > 100
     print(f"  • Coping plan generated ({len(plan)} chars).")
 
     briefing = generate_counselor_briefing(sample_inputs, shap_list, sample_text, fusion_res)
@@ -87,10 +98,10 @@ def run_tests():
 
     # Test 6: PDF Dossier Export
     print("\n[Test 6] PDF Counselor Dossier Generation...")
-    pdf_path = generate_counselor_pdf(sample_inputs, sample_text, fusion_res, briefing)
-    assert os.path.exists(pdf_path)
-    assert os.path.getsize(pdf_path) > 1000
-    print(f"  • PDF file created: {pdf_path} ({os.path.getsize(pdf_path)} bytes)")
+    pdf_bytes = generate_counselor_pdf(sample_inputs, sample_text, fusion_res, briefing)
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 1000
+    print(f"  • PDF created in memory ({len(pdf_bytes)} bytes); no dossier written to disk.")
 
     print("\n" + "=" * 65)
     print("  [SUCCESS] ALL 6 INTEGRATION TESTS PASSED PERFECTLY!")

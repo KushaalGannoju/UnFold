@@ -46,13 +46,13 @@ def risk_category(prob_dep: float) -> tuple[str, str]:
     Returns (category, emoji).
     """
     if prob_dep < 25:
-        return 'Low Risk',       '🟢'
+        return 'Low signal',       '🟢'
     elif prob_dep < 50:
-        return 'Moderate Risk',  '🟡'
+        return 'Moderate signal',  '🟡'
     elif prob_dep < 75:
-        return 'High Risk',      '🟠'
+        return 'High signal',      '🟠'
     else:
-        return 'Critical Risk',  '🔴'
+        return 'Very high signal',  '🔴'
 
 
 def risk_color(prob_dep: float) -> str:

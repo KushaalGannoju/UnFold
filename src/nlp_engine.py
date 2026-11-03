@@ -9,6 +9,8 @@ import os
 import re
 from html import escape
 import warnings
+import threading
+from support_flags import support_mentions
 import numpy as np
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -20,10 +22,18 @@ MODEL_DIR = os.path.join(BASE_DIR, "models", "roberta_mental_health")
 
 _MODEL = None
 _TOKENIZER = None
+_ENGINE_LOCK = threading.RLock()
+MAX_TOKENS = 256
 
 
 def load_nlp_engine(model_dir: str = MODEL_DIR):
     """Load and cache the fine-tuned RoBERTa model and tokenizer."""
+    global _MODEL, _TOKENIZER
+    with _ENGINE_LOCK:
+        return _load_nlp_engine(model_dir)
+
+
+def _load_nlp_engine(model_dir):
     global _MODEL, _TOKENIZER
     if _MODEL is None or _TOKENIZER is None:
         if not os.path.exists(model_dir):
@@ -31,8 +41,8 @@ def load_nlp_engine(model_dir: str = MODEL_DIR):
                 f"RoBERTa weights not found at '{model_dir}'.\n"
                 "Please place the unzipped roberta_mental_health folder in models/."
             )
-        _TOKENIZER = AutoTokenizer.from_pretrained(model_dir)
-        _MODEL = AutoModelForSequenceClassification.from_pretrained(model_dir)
+        _TOKENIZER = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
+        _MODEL = AutoModelForSequenceClassification.from_pretrained(model_dir, local_files_only=True)
         _MODEL.eval()
     return _MODEL, _TOKENIZER
 
@@ -50,11 +60,8 @@ def predict_text(text: str) -> dict:
     if not text or not text.strip():
         # Neutral fallback for empty input
         return {
-            "prediction": 0,
-            "label": "Not Depressed",
-            "confidence": 50.0,
-            "prob_dep": 50.0,
-            "prob_not": 50.0,
+            "prediction": None, "label": "No journal submitted", "available": False,
+            "confidence": None, "prob_dep": None, "prob_not": None,
         }
 
     model, tokenizer = load_nlp_engine()
@@ -63,10 +70,10 @@ def predict_text(text: str) -> dict:
         return_tensors="pt",
         padding=True,
         truncation=True,
-        max_length=256,
+        max_length=MAX_TOKENS,
     )
 
-    with torch.no_grad():
+    with _ENGINE_LOCK, torch.no_grad():
         outputs = model(**inputs)
         probs = torch.softmax(outputs.logits, dim=-1)[0].tolist()
 
@@ -74,13 +81,7 @@ def predict_text(text: str) -> dict:
     raw_prob_dep = probs[1] * 100
     pred = 1 if raw_prob_dep >= 50.0 else 0
 
-    # Calibrate to realistic clinical confidence (~82%-87% range instead of overconfident 99.9%)
-    if raw_prob_dep >= 50.0:
-        calibrated_dep = 50.0 + (raw_prob_dep - 50.0) * 0.73
-    else:
-        calibrated_dep = 50.0 - (50.0 - raw_prob_dep) * 0.73
-
-    prob_dep = round(float(np.clip(calibrated_dep, 13.5, 86.8)), 1)
+    prob_dep = round(raw_prob_dep, 1)
     prob_not = round(100.0 - prob_dep, 1)
 
     return {
@@ -89,6 +90,10 @@ def predict_text(text: str) -> dict:
         "confidence": round(max(prob_dep, prob_not), 1),
         "prob_dep": prob_dep,
         "prob_not": prob_not,
+        "available": True,
+        "truncated": len(tokenizer.encode(text)) > MAX_TOKENS,
+        "max_tokens": MAX_TOKENS,
+        "calibration": "Uncalibrated softmax score",
     }
 
 
@@ -102,33 +107,7 @@ def detect_comorbid_tags(text: str) -> list[dict]:
         return []
 
     lower_text = text.lower()
-    tags = []
-
-    # 1. Acute Suicidal / Self-Harm Flag (Highest Priority)
-    suicide_patterns = [
-        r"\bsuicid(e|al)\b",
-        r"\bkill myself\b",
-        r"\bend it all\b",
-        r"\bdon'?t want to live\b",
-        r"\bbetter off dead\b",
-        r"\bwant to die\b",
-        r"\bself[\s\-]?harm\b",
-        r"\bcut myself\b",
-        r"\bend my life\b",
-        r"\bno reason to live\b",
-    ]
-    for pattern in suicide_patterns:
-        if re.search(pattern, lower_text):
-            tags.append({
-                "category": "Suicidal Ideation",
-                "label": "⚠️ Acute Crisis / Self-Harm Risk",
-                "severity": "CRITICAL",
-                "badge_color": "#dc2626",
-                "text_color": "#ffffff",
-                "description": "Text exhibits direct indicators of acute despair or self-harm ideation.",
-                "is_critical": True,
-            })
-            break
+    tags = support_mentions(text)
 
     # 2. High Anxiety / Panic Indicators
     anxiety_keywords = [
@@ -219,28 +198,18 @@ def compute_token_saliency(text: str, top_k: int = 15) -> tuple[list[dict], str]
     model, tokenizer = load_nlp_engine()
     model.eval()
 
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128)
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=MAX_TOKENS)
     input_ids = inputs["input_ids"]
     attention_mask = inputs["attention_mask"]
 
     # Compute word embeddings with gradient tracking
-    embeddings = model.roberta.embeddings(input_ids)
-    embeddings.retain_grad()
+    with _ENGINE_LOCK, torch.enable_grad():
+        embeddings = model.get_input_embeddings()(input_ids).detach().requires_grad_(True)
+        outputs = model(inputs_embeds=embeddings, attention_mask=attention_mask)
+        grad, = torch.autograd.grad(outputs.logits[0, 1], embeddings)
+        attributions = torch.norm(grad[0], dim=-1).detach().cpu().numpy()
 
-    outputs = model.roberta(inputs_embeds=embeddings, attention_mask=attention_mask)
-    logits = model.classifier(outputs[0])
-
-    # Target class 1 (Depressed)
-    target_logit = logits[0, 1]
-    model.zero_grad()
-    target_logit.backward()
-
-    # Attribution: L2 norm of gradient vectors per token
-    with torch.no_grad():
-        grad = embeddings.grad[0]
-        attributions = torch.norm(grad, dim=-1).cpu().numpy()
-
-    tokens = [tokenizer.decode([tid]).strip() for tid in input_ids[0]]
+    tokens = [tokenizer.decode([tid]) for tid in input_ids[0]]
 
     # Filter out special tokens (<s>, </s>, <pad>)
     filtered_tokens = []
@@ -251,7 +220,7 @@ def compute_token_saliency(text: str, top_k: int = 15) -> tuple[list[dict], str]
             filtered_scores.append(float(score))
 
     if not filtered_scores:
-        return [], text
+        return [], escape(text)
 
     # Normalize attribution scores to 0-1
     max_score = max(filtered_scores) if max(filtered_scores) > 0 else 1.0
@@ -265,7 +234,7 @@ def compute_token_saliency(text: str, top_k: int = 15) -> tuple[list[dict], str]
         token_data.append({
             "token": tok,
             "score": round(n_score, 3),
-            "is_distress": n_score > 0.45,
+            "high_influence": n_score > 0.65,
         })
 
     # Build HTML highlighted string
@@ -285,9 +254,8 @@ def compute_token_saliency(text: str, top_k: int = 15) -> tuple[list[dict], str]
         html_spans.append(span)
 
     highlighted_html = (
-        "<div style='line-height:2.0; font-size:0.95rem; background:#ffffff; "
-        "padding:1.2rem; border-radius:10px; border:1px solid #e2e8f0;'>"
-        + " ".join(html_spans)
+        "<div style='white-space:pre-wrap; line-height:2.2; font-size:0.95rem;'>"
+        + "".join(html_spans)
         + "</div>"
     )
 
