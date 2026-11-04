@@ -39,6 +39,10 @@ class UITests(unittest.TestCase):
             button(app, "Run assessment").click().run()
             self.assertEqual(len(app.exception), 0)
             self.assertEqual(assess.call_count, 1)
+            self.assertTrue(any("Making sense of this moment" in m.value for m in app.markdown))
+            self.assertTrue(any("Finding the words" in m.value for m in app.markdown))
+            self.assertIn("could use someone to talk to", app.code[0].value)
+            self.assertTrue(any(d.proto.label == "Keep a copy of your plan" for d in app.get("download_button")))
             app.checkbox[0].check().run()
             self.assertTrue(app.session_state["uf_snapshot"]["completed_actions"][0])
             self.assertEqual(assess.call_count, 1)
@@ -64,6 +68,19 @@ class UITests(unittest.TestCase):
             self.assertNotIn("uf_snapshot", app.session_state)
             self.assertEqual(app.text_area[0].value, "")
             self.assertFalse(app.toggle[0].value)
+            self.assertEqual(len(app.exception), 0)
+
+    def test_generated_prose_is_escaped_and_scores_stay_in_evidence(self):
+        def assessment_with_markup(profile, journal, online=False):
+            snapshot = synthetic_assessment(profile, journal, online)
+            snapshot["guidance"]["summary"] = "A note <img src='https://example.invalid/test'> for you."
+            return snapshot
+
+        with patch("assessment.run_assessment", side_effect=assessment_with_markup):
+            app = AppTest.from_file(APP, default_timeout=20).run()
+            button(app, "Run assessment").click().run()
+            self.assertTrue(any("&lt;img" in m.value for m in app.markdown))
+            self.assertFalse(any("A note <img" in m.value for m in app.markdown))
             self.assertEqual(len(app.exception), 0)
 
     def test_demo_loads_matching_profile_and_journal_without_submitting(self):

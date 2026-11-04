@@ -27,6 +27,8 @@ The model files must exist at `models/depression_model.pkl` and `models/roberta_
 - Complete demo scenarios load both the profile and reflection without submitting or enabling online AI.
 - One submitted snapshot contains the inputs, model outputs, guidance, checklist, and prepared report. Editing inputs marks the result as out of date.
 - Student view emphasizes reflection and next steps. Counselor view adds submitted inputs, intake notes, model evidence, and PDF export.
+- Student guidance includes a personal opening, perspective, an optional grounding exercise, three practical steps with explanations and suggested timing, an outreach-message draft, and a closing. Gemini is prompted for approximately 550-800 words, with a 300-word minimum quality check across student content. Sparse inputs must not lead to invented experiences. Current support flags retain shorter, immediate local support guidance.
+- The lavender-accented interface puts the supportive response first; model scores remain in the evidence panel. Optional step checkboxes are not a recovery or productivity score. Students can copy an outreach draft and download their plan as Markdown without another AI request.
 - Action checkboxes persist within the current assessment. Navigation, checklist changes, and downloads do not repeat inference or online guidance calls.
 - Clear removes the session's inputs, snapshot, action selections, and prepared PDF.
 
@@ -43,9 +45,11 @@ GEMINI_MODEL = "gemini-3.5-flash-lite"
 GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 ```
 
-For HTTP 500/502/503/504, the SDK retries once with a short backoff. If the selected model remains unavailable, is not found (404), or times out, the app tries the configured fallback. There are at most two attempts per model, a 15-second per-request timeout, and at most two distinct models per submission. Authentication, quota, and invalid-request errors do not trigger a retry or model switch. Model access and capacity are not guaranteed; if the allowed attempts fail, the app returns local guidance. This may mean up to four Google requests for one opted-in assessment.
+For HTTP 500/502/503/504, the SDK retries once with a short backoff. If the selected model remains unavailable, is not found (404), or times out, the app tries the configured fallback. There are at most two attempts per model, a 30-second per-request timeout, and at most two distinct models per submission. The structured response budget is 6,144 tokens to allow detailed student guidance and a separate counselor brief. Authentication, quota, and invalid-request errors do not trigger a retry or model switch. Model access and capacity are not guaranteed; if the allowed attempts fail, the app returns expanded local guidance. This may mean up to four Google requests for one opted-in assessment.
 
 When online guidance fails, the assessment displays a fixed, credential-free explanation for quota/rate limits, authentication/access, model availability, request configuration, timeouts, provider outages, or invalid responses. Server logs contain only an error category, HTTP status, model identifier, and exception type. A valid key does not guarantee model access or available quota. After changing cloud secrets, reboot the app if needed and submit a new assessment: existing session snapshots retain their previous guidance result.
+
+The suggestions use general wellbeing practices such as optional grounding, smaller practical steps, and social connection, consistent with [WHO's stress-management resource](https://www.who.int/thailand/activities/doing-what-matters-in-times-of-stress). Neither generated nor local guidance is a clinically validated treatment, and no improvement in mood is guaranteed.
 
 An API key alone does **not** enable online processing. The user must enable **Use online AI guidance** for the submission. That choice permits sending the profile, reflection, model summary, and leading contributors to Google Gemini, whose processing/retention policies apply. Current support-language flags use deterministic local support guidance instead. Missing keys or failed responses produce a visibly labeled local fallback.
 

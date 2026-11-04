@@ -16,7 +16,7 @@ import streamlit as st
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE_DIR / "src"))
 from assessment import DEFAULT_PROFILE, SLEEP_OPTIONS, DEMO_CASES, assessment_signature, run_assessment
-from genai_advisor import get_default_api_key
+from genai_advisor import get_default_api_key, student_plan_markdown
 from predict import load_bundle
 from report_generator import generate_counselor_pdf
 from research import benchmark_rows, load_paired_evaluation
@@ -28,8 +28,8 @@ st.set_page_config(page_title="UnFold | Student wellbeing", page_icon=str(BASE_D
                    layout="wide", initial_sidebar_state="auto")
 st.markdown("""<style>
 html, body, button, input, textarea {letter-spacing:0 !important;}
-.block-container {max-width:1200px; padding-top:4.5rem; padding-bottom:3rem;}
-[data-testid="stSidebar"] {min-width:290px; max-width:310px; background:#f3f6f7; border-right:1px solid #dce4e7;}
+.block-container {max-width:1160px; padding-top:4.5rem; padding-bottom:3rem;}
+[data-testid="stSidebar"] {min-width:290px; max-width:310px; background:#f6f2fb; border-right:1px solid #e7def0;}
 [data-testid="stSidebar"] .block-container {padding-top:1.5rem;}
 h1 {font-size:1.8rem !important; padding-top:0 !important;}
 h2 {font-size:1.25rem !important;}
@@ -37,18 +37,21 @@ h3 {font-size:1.05rem !important;}
 .brand {display:flex; align-items:center; gap:14px; margin-bottom:1.4rem;}
 .brand img {height:46px; width:46px; object-fit:contain;}
 .brand h1 {margin:0; padding:0; line-height:1.2;}
-.brand p {margin:4px 0 0; color:#62737c; font-size:0.92rem;}
+.brand p {margin:4px 0 0; color:#71667f; font-size:0.92rem;}
 .brand > div {min-width:0;}
-.session-note {margin-left:auto; color:#50616b; font-size:0.78rem; white-space:nowrap;}
-.summary {border-left:4px solid #087e8b; padding:4px 0 4px 18px; margin:8px 0 18px;}
-.summary-label {font-size:0.82rem; color:#53656e;}
-.summary-value {font-size:2rem; font-weight:650; color:#23323a;}
-.summary-value small {font-size:0.95rem; font-weight:400; color:#62737c;}
-.summary p {margin:6px 0 0;}
+.session-note {margin-left:auto; color:#71667f; font-size:0.78rem; white-space:nowrap;}
+.guidance-copy {max-width:760px; font-size:1rem; line-height:1.85; color:#443c50;}
+.guidance-copy p {margin:0 0 1rem; line-height:1.85; overflow-wrap:anywhere;}
+.guidance-opening {border-left:3px solid #c9b5e5; padding-left:20px; margin:18px 0 28px;}
+.st-key-uf_grounding {background:#f0f6f2; border-color:#d8e6dc !important;}
+.st-key-uf_grounding p {color:#3e5b49;}
+.action-timing {font-size:0.78rem; color:#7955ad; font-weight:600; margin-top:18px; margin-bottom:6px;}
+[data-testid="stCheckbox"] label p {font-weight:600;}
 [data-testid="stMetricValue"] {font-size:1.5rem;}
 [data-testid="stButton"] button, [data-testid="stDownloadButton"] button {border-radius:6px; min-height:40px;}
 [data-testid="stTextArea"] textarea {line-height:1.65; border-radius:6px;}
 [data-testid="stExpander"] {border-radius:6px; box-shadow:none;}
+[data-testid="stCode"] {border:1px solid #e7def0; border-radius:6px;}
 @media(max-width:768px) {
  .block-container {padding:4.5rem 1rem 2rem;}
  .brand {gap:10px; flex-wrap:nowrap; margin-bottom:0.7rem;}
@@ -141,9 +144,12 @@ def render_support(profile, journal):
 def render_explanations(snapshot):
     result = snapshot["result"]
     f = result["fusion_result"]
-    a, b = st.columns(2)
+    combined, a, b = st.columns(3)
+    combined.metric("Combined model", f"{f['hybrid_prob_dep']:.1f}/100")
     a.metric("Profile model", f"{f['tabular_prob_dep']:.1f}/100")
     b.metric("Journal model", f"{f['text_prob_dep']:.1f}/100" if f["text_prob_dep"] is not None else "Not assessed")
+    st.caption("A screening signal, not a diagnosis or an individual probability of depression.")
+    st.write(f["consensus_note"])
     st.caption(f"Profile weight {f['weights']['tabular']:.0%} · Journal weight {f['weights']['text']:.0%}. Scores are uncalibrated.")
     st.markdown("#### Profile contributions")
     contrib = result["tabular_contrib"]
@@ -153,7 +159,7 @@ def render_explanations(snapshot):
         fig.patch.set_alpha(0)
         ax.set_facecolor("none")
         ax.barh(values.feature.map(format_feature_name), values.shap_value,
-                color=["#087e8b" if v < 0 else "#b56a30" for v in values.shap_value])
+                color=["#9180b2" if v < 0 else "#bc895d" for v in values.shap_value])
         ax.axvline(0, color="#8b9aa2", linewidth=0.8)
         ax.spines[["top", "right", "left"]].set_visible(False)
         ax.set_xlabel("SHAP contribution to the model output (log-odds)", fontsize=9)
@@ -176,31 +182,58 @@ def render_explanations(snapshot):
         st.caption("Phrase rules can miss context. These are conversation prompts, not diagnoses.")
 
 
+def render_prose(text, opening=False):
+    paragraphs = "".join("<p>" + escape(paragraph).replace("\n", "<br/>") + "</p>"
+                         for paragraph in text.split("\n\n") if paragraph.strip())
+    css_class = "guidance-copy guidance-opening" if opening else "guidance-copy"
+    st.markdown(f"<div class='{css_class}'>{paragraphs}</div>", unsafe_allow_html=True)
+
+
 def render_results(snapshot, stale, counselor):
     result, guidance = snapshot["result"], snapshot["guidance"]
     fusion = result["fusion_result"]
     st.divider()
-    st.subheader("Assessment summary")
+    st.subheader("A little space for you")
     if stale:
         st.warning("Results need updating. The summary below belongs to your last submitted assessment.")
     submitted = datetime.fromisoformat(snapshot["assessed_at"]).astimezone(ZoneInfo("Asia/Kolkata"))
     st.caption("Submitted " + submitted.strftime("%d %b %Y, %I:%M %p IST") + " · " + guidance["source"])
-    st.markdown(
-        f"<div class='summary'><div class='summary-label'>Combined model signal</div>"
-        f"<div class='summary-value'>{fusion['hybrid_prob_dep']:.1f} <small>/ 100</small></div>"
-        f"<p>{escape(fusion['consensus_status'])}</p></div>", unsafe_allow_html=True)
-    st.caption("A screening signal, not a diagnosis or an individual probability of depression.")
-    st.write(fusion["consensus_note"])
-    st.write(guidance["summary"])
     if guidance.get("fallback"):
         st.caption(guidance["fallback_reason"])
-    st.markdown("#### Your next steps")
+    render_prose(guidance["summary"], opening=True)
+    if guidance.get("perspective"):
+        st.markdown("#### Making sense of this moment")
+        render_prose(guidance["perspective"])
+    if guidance.get("grounding"):
+        with st.container(border=True, key="uf_grounding"):
+            st.markdown("#### A moment to pause")
+            render_prose(guidance["grounding"])
+    st.markdown("#### A few steps to choose from")
+    st.caption("One small step is enough for today. This is not a measure of your progress or worth.")
+    details = guidance.get("action_details", [])
     for i, action in enumerate(guidance["actions"]):
+        if i < len(details):
+            st.markdown(f"<div class='action-timing'>{escape(details[i]['when'])}</div>", unsafe_allow_html=True)
         key = f"uf_action_{snapshot['id']}_{i}"
         st.session_state.setdefault(key, snapshot["completed_actions"][i])
         snapshot["completed_actions"][i] = st.checkbox(action, key=key, disabled=stale)
+        if i < len(details):
+            render_prose(details[i]["why"])
+            for step in details[i]["steps"]:
+                render_prose("• " + step)
     completed = sum(snapshot["completed_actions"])
-    st.progress(completed / len(guidance["actions"]), text=f"{completed} of {len(guidance['actions'])} actions checked")
+    if completed:
+        st.caption(f"{completed} step{'s' if completed != 1 else ''} tried. You can leave the others for another day.")
+    if guidance.get("support_message"):
+        st.markdown("#### Finding the words")
+        st.caption("A message you can adapt for someone you trust.")
+        st.code(guidance["support_message"], language=None, wrap_lines=True)
+    if guidance.get("closing"):
+        st.markdown("#### Take this at your pace")
+        render_prose(guidance["closing"])
+    st.download_button("Keep a copy of your plan", student_plan_markdown(guidance).encode("utf-8"),
+                       file_name=f"UnFold_plan_{snapshot['id'][:8]}.md", mime="text/markdown",
+                       icon=":material/download:", on_click="ignore", disabled=stale)
     with st.expander("Model evidence & explanations", expanded=counselor):
         render_explanations(snapshot)
     if counselor:
@@ -209,11 +242,11 @@ def render_results(snapshot, stale, counselor):
         for key, title in [("executive_summary", "Summary"), ("primary_concerns", "Conversation topics"),
                            ("interview_prompts", "Exploratory questions")]:
             st.markdown("**" + title + "**")
-            st.write(briefing[key])
+            st.text(briefing[key])
         with st.expander("Submitted profile & journal"):
             st.dataframe(pd.DataFrame([{"Field": k.replace("_", " ").title(), "Value": str(v)}
                                        for k, v in snapshot["profile"].items()]), hide_index=True, width="stretch")
-            st.write(snapshot["journal"] or "No journal submitted.")
+            st.text(snapshot["journal"] or "No journal submitted.")
         if snapshot["pdf"] is None:
             if st.button("Prepare counselor report", icon=":material/picture_as_pdf:", disabled=stale):
                 try:

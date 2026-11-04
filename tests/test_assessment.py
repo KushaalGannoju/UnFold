@@ -11,10 +11,17 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from assessment import DEFAULT_PROFILE, DEMO_CASES, assessment_signature, validate_profile, run_assessment
 from fusion import fuse_predictions
-from genai_advisor import generate_guidance, local_guidance, get_setting, guidance_error
+from genai_advisor import generate_guidance, local_guidance, get_setting, guidance_error, student_plan_markdown
 from report_generator import generate_counselor_pdf
 from support_flags import support_mentions
 from research import load_paired_evaluation
+
+
+def rich_response():
+    guidance = local_guidance(DEFAULT_PROFILE, "I feel tired after a demanding week.",
+                              fuse_predictions({"prob_dep": 30}, {"prob_dep": 40}))
+    return {**{key: guidance[key] for key in ["summary", "perspective", "grounding", "action_details", "support_message", "closing"]},
+            **{key: guidance["briefing"][key] for key in ["executive_summary", "primary_concerns", "interview_prompts"]}}
 
 
 class AssessmentTests(unittest.TestCase):
@@ -107,8 +114,7 @@ class AssessmentTests(unittest.TestCase):
 
     def test_online_response_and_failure_are_labeled(self):
         from unittest.mock import MagicMock
-        response = {"summary": "Supportive summary", "actions": ["First step", "Second step", "Third step"],
-                    "executive_summary": "Intake summary", "primary_concerns": "Topics", "interview_prompts": "Questions"}
+        response = rich_response()
         with patch("google.genai.Client") as client:
             model = client.return_value.__enter__.return_value.models
             model.generate_content.return_value = MagicMock(text=json.dumps(response))
@@ -125,8 +131,7 @@ class AssessmentTests(unittest.TestCase):
 
     def test_server_failure_switches_to_one_fallback_model(self):
         from unittest.mock import MagicMock
-        payload = {"summary": "Summary", "actions": ["One", "Two", "Three"],
-                   "executive_summary": "Intake", "primary_concerns": "Topics", "interview_prompts": "Questions"}
+        payload = rich_response()
         unavailable = RuntimeError("synthetic unavailable")
         unavailable.code = 503
         with patch("google.genai.Client") as client, patch("genai_advisor.get_setting", side_effect=["gemini-primary", "gemini-backup"]):
@@ -205,6 +210,41 @@ class AssessmentTests(unittest.TestCase):
         result = local_guidance(DEFAULT_PROFILE, "I feel tired.", self.fusion())
         self.assertIn("Academic pressure:", result["briefing"]["primary_concerns"])
         self.assertIn("Sleep:", result["briefing"]["primary_concerns"])
+
+    def test_guidance_contains_substantive_student_sections(self):
+        profile = {**DEFAULT_PROFILE, "academic": 5, "sleep": "5-6 hours", "financial": 5}
+        guidance = local_guidance(profile, "I feel exhausted.", self.fusion())
+        plan = student_plan_markdown(guidance)
+        self.assertGreater(len(plan.split()), 400)
+        self.assertIn("academic pressure", guidance["perspective"])
+        self.assertIn("shorter sleep", guidance["perspective"])
+        self.assertIn("Financial stress", guidance["perspective"])
+        self.assertEqual(guidance["actions"], [a["title"] for a in guidance["action_details"]])
+        self.assertTrue(all(len(a["steps"]) >= 2 and a["when"] and a["why"] for a in guidance["action_details"]))
+        self.assertIn("Finding the words", plan)
+        self.assertIn(guidance["support_message"], plan)
+
+    def test_sparse_and_current_support_guidance_remain_appropriate(self):
+        sparse = local_guidance(DEFAULT_PROFILE, "", self.fusion())
+        self.assertIn("without writing a reflection", sparse["summary"])
+        support = local_guidance(DEFAULT_PROFILE, "Synthetic text", {**self.fusion(), "is_critical": True})
+        self.assertIn("Right now", support["action_details"][0]["when"])
+        self.assertIn("don't feel safe", support["support_message"])
+        self.assertNotIn("coursework", support["actions"][0])
+
+    def test_incomplete_or_thin_online_guidance_is_not_published(self):
+        from unittest.mock import MagicMock
+        for invalid in [{"summary": "A short response"},
+                        {**rich_response(), **{f: "Too short" for f in ["summary", "perspective", "grounding", "closing"]},
+                         "action_details": [{"title": "Rest", "when": "Today", "why": "Helpful", "steps": ["Pause", "Rest"]}] * 3}]:
+            with patch("google.genai.Client") as client:
+                models = client.return_value.__enter__.return_value.models
+                models.generate_content.return_value = MagicMock(text=json.dumps(invalid))
+                guidance = generate_guidance(DEFAULT_PROFILE, [], "Synthetic text", self.fusion(),
+                                             allow_online=True, api_key="test-key")
+                self.assertEqual(guidance["source"], "Local guidance")
+                self.assertEqual(guidance["failure_category"], "response")
+                self.assertGreater(len(student_plan_markdown(guidance).split()), 400)
 
     def test_signature_tracks_inputs_and_privacy(self):
         p = copy.deepcopy(DEFAULT_PROFILE)
