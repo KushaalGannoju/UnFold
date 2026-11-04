@@ -8,6 +8,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+TRANSIENT_STATUS_CODES = [500, 502, 503, 504]
 
 
 def get_setting(*names, default=None):
@@ -58,6 +61,13 @@ def guidance_error(exc):
     if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
         return "timeout", "The Gemini request timed out. Try submitting again; if this persists, check model availability and the hosting network.", code
     return "unexpected", "The Gemini request failed before usable guidance was returned. Check the app's server logs for the safe error category and HTTP status.", code
+
+
+def log_guidance_failure(exc, model_name):
+    category, _, status = guidance_error(exc)
+    safe_model = model_name if re.fullmatch(r"(?:models/)?gemini-[a-zA-Z0-9._-]{1,80}", model_name) else "invalid-model-setting"
+    logger.warning("Gemini guidance failed: category=%s status=%s model=%s error_type=%s",
+                   category, status, safe_model, type(exc).__name__)
 
 
 def local_guidance(profile, text, fusion):
@@ -113,7 +123,11 @@ def generate_guidance(profile, shap_items, text, fusion, allow_online=False, api
     if fusion.get("is_critical"):
         result.update(fallback=True, fallback_reason="Local support guidance was used for this assessment.")
         return result
-    model_name = get_setting("GEMINI_MODEL", default="gemini-flash-latest")
+    model_name = get_setting("GEMINI_MODEL", default=DEFAULT_MODEL)
+    fallback_name = get_setting("GEMINI_FALLBACK_MODEL", default=DEFAULT_FALLBACK_MODEL)
+    models = [model_name]
+    if fallback_name and fallback_name.lower() not in {"none", "off"} and fallback_name != model_name:
+        models.append(fallback_name)
     try:
         from google import genai
         from google.genai import types
@@ -134,12 +148,25 @@ def generate_guidance(profile, shap_items, text, fusion, allow_online=False, api
             "prescribe treatments, or invent contact numbers. Return exactly three short actions, "
             "a supportive summary and the three counselor sections in the response schema.\n" + json.dumps(payload)
         )
-        with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=30000)) as client:
-            response = client.models.generate_content(
-                model=model_name, contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema,
-                                                  temperature=0.3, max_output_tokens=4096),
-            )
+        # Limit the SDK's default retries: at most two attempts for each of two models.
+        retry_options = types.HttpRetryOptions(attempts=2, initial_delay=1, max_delay=2,
+                                               exp_base=2, jitter=0.25,
+                                               http_status_codes=TRANSIENT_STATUS_CODES)
+        with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=15000, retry_options=retry_options)) as client:
+            for index, model_name in enumerate(models):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name, contents=prompt,
+                        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema,
+                                                          temperature=0.3, max_output_tokens=4096),
+                    )
+                    break
+                except Exception as exc:
+                    category, _, status = guidance_error(exc)
+                    can_fallback = status in TRANSIENT_STATUS_CODES or status == 404 or category == "timeout"
+                    if index == len(models) - 1 or not can_fallback:
+                        raise
+                    log_guidance_failure(exc, model_name)
         try:
             data = json.loads(response.text or "")
         except (ValueError, TypeError) as exc:
@@ -154,13 +181,11 @@ def generate_guidance(profile, shap_items, text, fusion, allow_online=False, api
         briefing = {f: data[f] for f in fields[1:]}
         briefing["raw_text"] = "\n\n".join(briefing.values())
         return {"summary": data["summary"], "actions": data["actions"], "briefing": briefing,
-                "source": "Google Gemini", "online_requested": True, "fallback": False}
+                "source": "Google Gemini", "model": model_name, "online_requested": True, "fallback": False}
     except Exception as exc:
         category, reason, status = guidance_error(exc)
         # Do not log provider messages, API keys, prompts, responses, or exception traces.
-        safe_model = model_name if re.fullmatch(r"(?:models/)?gemini-[a-zA-Z0-9._-]{1,80}", model_name) else "invalid-model-setting"
-        logger.warning("Gemini guidance failed: category=%s status=%s model=%s error_type=%s",
-                       category, status, safe_model, type(exc).__name__)
+        log_guidance_failure(exc, model_name)
         result.update(fallback=True, fallback_reason=reason + " Local guidance is shown instead.",
                       failure_category=category)
         return result

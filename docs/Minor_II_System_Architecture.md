@@ -15,7 +15,7 @@ The render loop reuses the snapshot. Input changes mark it stale, disable action
 
 ## Guidance and Reporting
 
-`src/genai_advisor.py` provides local guidance by default. Explicit online opt-in is required even if a key is present. One time-bounded structured Gemini request supplies student actions and counselor sections together. Responses are validated; missing configuration or errors return labeled local guidance. Potential current support-language flags use local support guidance without forwarding the journal.
+`src/genai_advisor.py` provides local guidance by default. Explicit online opt-in is required even if a key is present. A structured Gemini request supplies student actions and counselor sections together. Server errors are retried once by the SDK; server failure, timeout, or model-not-found may switch to one configured fallback model. Each of at most two models is limited to two attempts with a 15-second per-request timeout. Authentication, quota, and request-configuration errors stop immediately. Responses are validated; missing configuration or exhausted attempts return labeled local guidance. Potential current support-language flags use local support guidance without forwarding the journal.
 
 `src/report_generator.py` returns PDF bytes by default. Export happens only when requested, and the result is reused. Reports include the submitted profile, full reflection, separate support notes, and intake brief. The caller can explicitly pass an output path for a deliberate file export. Reports paginate instead of silently truncating reflections to one page.
 

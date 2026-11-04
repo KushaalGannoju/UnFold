@@ -34,7 +34,16 @@ The model files must exist at `models/depression_model.pkl` and `models/roberta_
 
 Local guidance is the default. The application holds student inputs, results, and prepared PDF bytes in the browser's server session; it does not automatically write new counselor reports to disk or maintain an assessment database. Previously generated files under `reports/` are not deleted by this update. Server operators still control the hosting environment.
 
-To make online guidance available, configure `GEMINI_API_KEY` in the server environment, a local ignored `.env`, or Streamlit Cloud secrets. Never commit credentials. Optionally set `GEMINI_MODEL` in the environment or Streamlit secrets to an available model identifier; the default is `gemini-flash-latest`. Streamlit secrets take precedence over environment/.env values.
+To make online guidance available, configure `GEMINI_API_KEY` in the server environment, a local ignored `.env`, or Streamlit Cloud secrets. Never commit credentials. Streamlit secrets take precedence over environment/.env values.
+
+The default model is `gemini-3.5-flash-lite`, with `gemini-3.1-flash-lite` as a fallback. Set `GEMINI_MODEL` and `GEMINI_FALLBACK_MODEL` to supported models available to your API project. Set the fallback to `none` to disable it. For example, these non-secret settings can be added alongside your existing key in Streamlit secrets:
+
+```toml
+GEMINI_MODEL = "gemini-3.5-flash-lite"
+GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+```
+
+For HTTP 500/502/503/504, the SDK retries once with a short backoff. If the selected model remains unavailable, is not found (404), or times out, the app tries the configured fallback. There are at most two attempts per model, a 15-second per-request timeout, and at most two distinct models per submission. Authentication, quota, and invalid-request errors do not trigger a retry or model switch. Model access and capacity are not guaranteed; if the allowed attempts fail, the app returns local guidance. This may mean up to four Google requests for one opted-in assessment.
 
 When online guidance fails, the assessment displays a fixed, credential-free explanation for quota/rate limits, authentication/access, model availability, request configuration, timeouts, provider outages, or invalid responses. Server logs contain only an error category, HTTP status, model identifier, and exception type. A valid key does not guarantee model access or available quota. After changing cloud secrets, reboot the app if needed and submit a new assessment: existing session snapshots retain their previous guidance result.
 

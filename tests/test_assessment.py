@@ -123,6 +123,70 @@ class AssessmentTests(unittest.TestCase):
             self.assertTrue(failed["fallback"])
             self.assertEqual(failed["source"], "Local guidance")
 
+    def test_server_failure_switches_to_one_fallback_model(self):
+        from unittest.mock import MagicMock
+        payload = {"summary": "Summary", "actions": ["One", "Two", "Three"],
+                   "executive_summary": "Intake", "primary_concerns": "Topics", "interview_prompts": "Questions"}
+        unavailable = RuntimeError("synthetic unavailable")
+        unavailable.code = 503
+        with patch("google.genai.Client") as client, patch("genai_advisor.get_setting", side_effect=["gemini-primary", "gemini-backup"]):
+            models = client.return_value.__enter__.return_value.models
+            models.generate_content.side_effect = [unavailable, MagicMock(text=json.dumps(payload))]
+            result = generate_guidance(DEFAULT_PROFILE, [], "Synthetic text", self.fusion(),
+                                       allow_online=True, api_key="test-key")
+            self.assertEqual(result["source"], "Google Gemini")
+            self.assertEqual(result["model"], "gemini-backup")
+            self.assertEqual([c.kwargs["model"] for c in models.generate_content.call_args_list],
+                             ["gemini-primary", "gemini-backup"])
+            retry = client.call_args.kwargs["http_options"].retry_options
+            self.assertEqual(retry.attempts, 2)
+            self.assertNotIn(429, retry.http_status_codes)
+
+    def test_permanent_errors_never_switch_models(self):
+        for status in [400, 401, 403, 429]:
+            with self.subTest(status=status), patch("google.genai.Client") as client:
+                error = RuntimeError("synthetic error")
+                error.code = status
+                models = client.return_value.__enter__.return_value.models
+                models.generate_content.side_effect = error
+                result = generate_guidance(DEFAULT_PROFILE, [], "Synthetic text", self.fusion(),
+                                           allow_online=True, api_key="test-key")
+                self.assertEqual(models.generate_content.call_count, 1)
+                self.assertEqual(result["source"], "Local guidance")
+
+    def test_duplicate_or_disabled_fallback_does_not_repeat_model(self):
+        for fallback in ["gemini-primary", "none"]:
+            with self.subTest(fallback=fallback), patch("google.genai.Client") as client, \
+                 patch("genai_advisor.get_setting", side_effect=["gemini-primary", fallback]):
+                error = RuntimeError("synthetic unavailable")
+                error.code = 503
+                models = client.return_value.__enter__.return_value.models
+                models.generate_content.side_effect = error
+                result = generate_guidance(DEFAULT_PROFILE, [], "Synthetic text", self.fusion(),
+                                           allow_online=True, api_key="test-key")
+                self.assertEqual(models.generate_content.call_count, 1)
+                self.assertEqual(result["failure_category"], "provider")
+
+    def test_real_sdk_retries_503_without_network(self):
+        import httpx
+        from google import genai
+        from google.genai import types
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            if len(calls) == 1:
+                return httpx.Response(503, json={"error": {"code": 503, "status": "UNAVAILABLE", "message": "Synthetic busy response"}})
+            return httpx.Response(200, json={"candidates": [{"content": {"role": "model", "parts": [{"text": "Synthetic success"}]}, "finishReason": "STOP"}]})
+
+        http_client = httpx.Client(transport=httpx.MockTransport(handler))
+        options = types.HttpOptions(httpx_client=http_client, retry_options=types.HttpRetryOptions(
+            attempts=2, initial_delay=0.001, max_delay=0.001, jitter=0, http_status_codes=[503]))
+        with genai.Client(api_key="test-key", http_options=options) as client:
+            response = client.models.generate_content(model="gemini-test", contents="Synthetic test")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(response.text, "Synthetic success")
+
     def test_paired_evaluation_uses_matching_rows(self):
         import pandas as pd
         from evaluate_hybrid import evaluate_paired
