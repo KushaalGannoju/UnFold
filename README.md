@@ -34,7 +34,9 @@ The model files must exist at `models/depression_model.pkl` and `models/roberta_
 
 Local guidance is the default. The application holds student inputs, results, and prepared PDF bytes in the browser's server session; it does not automatically write new counselor reports to disk or maintain an assessment database. Previously generated files under `reports/` are not deleted by this update. Server operators still control the hosting environment.
 
-To make online guidance available, configure `GEMINI_API_KEY` in the server environment, a local ignored `.env`, or Streamlit Cloud secrets. Never commit credentials. Optionally set `GEMINI_MODEL` in the server environment to an available model identifier; the default is `gemini-flash-latest`.
+To make online guidance available, configure `GEMINI_API_KEY` in the server environment, a local ignored `.env`, or Streamlit Cloud secrets. Never commit credentials. Optionally set `GEMINI_MODEL` in the environment or Streamlit secrets to an available model identifier; the default is `gemini-flash-latest`. Streamlit secrets take precedence over environment/.env values.
+
+When online guidance fails, the assessment displays a fixed, credential-free explanation for quota/rate limits, authentication/access, model availability, request configuration, timeouts, provider outages, or invalid responses. Server logs contain only an error category, HTTP status, model identifier, and exception type. A valid key does not guarantee model access or available quota. After changing cloud secrets, reboot the app if needed and submit a new assessment: existing session snapshots retain their previous guidance result.
 
 An API key alone does **not** enable online processing. The user must enable **Use online AI guidance** for the submission. That choice permits sending the profile, reflection, model summary, and leading contributors to Google Gemini, whose processing/retention policies apply. Current support-language flags use deterministic local support guidance instead. Missing keys or failed responses produce a visibly labeled local fallback.
 

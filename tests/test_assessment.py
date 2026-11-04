@@ -11,13 +11,42 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from assessment import DEFAULT_PROFILE, DEMO_CASES, assessment_signature, validate_profile, run_assessment
 from fusion import fuse_predictions
-from genai_advisor import generate_guidance, local_guidance
+from genai_advisor import generate_guidance, local_guidance, get_setting, guidance_error
 from report_generator import generate_counselor_pdf
 from support_flags import support_mentions
 from research import load_paired_evaluation
 
 
 class AssessmentTests(unittest.TestCase):
+    def test_cloud_secrets_override_environment(self):
+        with patch("streamlit.secrets", {"GEMINI_API_KEY": " cloud-test-key ", "GEMINI_MODEL": "gemini-test"}), \
+             patch.dict("os.environ", {"GEMINI_API_KEY": "old-test-key"}):
+            self.assertEqual(get_setting("GEMINI_API_KEY"), "cloud-test-key")
+            self.assertEqual(get_setting("GEMINI_MODEL"), "gemini-test")
+
+    def test_provider_errors_are_specific_and_never_echo_details(self):
+        for status, category in [(400, "request"), (401, "access"), (403, "access"),
+                                 (404, "model"), (429, "quota"), (503, "provider")]:
+            exc = RuntimeError("private-key-and-journal-must-not-appear")
+            exc.code = status
+            actual, message, code = guidance_error(exc)
+            self.assertEqual(actual, category)
+            self.assertEqual(code, status)
+            self.assertNotIn("private-key", message)
+        self.assertEqual(guidance_error(TimeoutError())[0], "timeout")
+
+    def test_failed_request_logs_only_safe_metadata(self):
+        with patch("google.genai.Client") as client, patch("genai_advisor.get_setting", return_value="gemini-test"):
+            exc = RuntimeError("private-key-and-journal-must-not-appear")
+            exc.code = 429
+            client.return_value.__enter__.return_value.models.generate_content.side_effect = exc
+            with self.assertLogs("genai_advisor", level="WARNING") as captured:
+                result = generate_guidance(DEFAULT_PROFILE, [], "Synthetic text", self.fusion(),
+                                           allow_online=True, api_key="test-key")
+        self.assertEqual(result["failure_category"], "quota")
+        self.assertIn("429", result["fallback_reason"])
+        self.assertNotIn("private-key", " ".join(captured.output))
+
     def test_explicit_denials(self):
         for text in ["I am not suicidal.", "I don't want to die.", "I have no thoughts of self-harm.",
                      "I am not planning to kill myself."]:

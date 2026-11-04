@@ -1,21 +1,63 @@
 """Session guidance. Network requests require an explicit opt-in for each assessment."""
 
 import json
+import logging
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
+
+
+def get_setting(*names, default=None):
+    """Cloud secrets take precedence over a stale environment or local .env file."""
+    try:
+        import streamlit as st
+        for name in names:
+            value = st.secrets.get(name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    except (FileNotFoundError, KeyError):
+        pass
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return default
 
 
 def get_default_api_key():
-    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if key:
-        return key.strip()
-    try:
-        import streamlit as st
-        return st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
-    except (FileNotFoundError, KeyError):
-        return None
+    return get_setting("GEMINI_API_KEY", "GOOGLE_API_KEY")
+
+
+class GuidanceResponseError(ValueError):
+    pass
+
+
+def guidance_error(exc):
+    """Return fixed messages only: provider exception text may contain private data."""
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and code.isdigit():
+        code = int(code)
+    if code is None:
+        response = getattr(exc, "response", None)
+        code = getattr(response, "status_code", None)
+    if code == 429:
+        return "quota", "Google rejected the request because of a quota or rate limit (429). Check the API project's usage and billing; changing a key in the same project does not reset its quota.", code
+    if code in (401, 403):
+        return "access", "Google rejected authentication or access (401/403). Check that the key is valid for the Gemini Developer API and that its project and API restrictions allow the request.", code
+    if code == 404:
+        return "model", "The configured Gemini model was not found or is unavailable to this API project (404). Check GEMINI_MODEL in Streamlit secrets.", code
+    if code == 400:
+        return "request", "Google rejected the request configuration (400). The key, model, structured-output settings, or project configuration may be incompatible.", code
+    if isinstance(code, int) and code >= 500:
+        return "provider", "Google's Gemini service is temporarily unavailable (5xx). Try submitting again later.", code
+    if isinstance(exc, GuidanceResponseError):
+        return "response", "Gemini returned an empty, incomplete, or invalid structured response. Try submitting again or choose another supported model.", code
+    if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
+        return "timeout", "The Gemini request timed out. Try submitting again; if this persists, check model availability and the hosting network.", code
+    return "unexpected", "The Gemini request failed before usable guidance was returned. Check the app's server logs for the safe error category and HTTP status.", code
 
 
 def local_guidance(profile, text, fusion):
@@ -71,6 +113,7 @@ def generate_guidance(profile, shap_items, text, fusion, allow_online=False, api
     if fusion.get("is_critical"):
         result.update(fallback=True, fallback_reason="Local support guidance was used for this assessment.")
         return result
+    model_name = get_setting("GEMINI_MODEL", default="gemini-flash-latest")
     try:
         from google import genai
         from google.genai import types
@@ -91,26 +134,35 @@ def generate_guidance(profile, shap_items, text, fusion, allow_online=False, api
             "prescribe treatments, or invent contact numbers. Return exactly three short actions, "
             "a supportive summary and the three counselor sections in the response schema.\n" + json.dumps(payload)
         )
-        with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=15000)) as client:
+        with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=30000)) as client:
             response = client.models.generate_content(
-                model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"), contents=prompt,
+                model=model_name, contents=prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema,
-                                                  temperature=0.3, max_output_tokens=1600),
+                                                  temperature=0.3, max_output_tokens=4096),
             )
-        data = json.loads(response.text)
+        try:
+            data = json.loads(response.text or "")
+        except (ValueError, TypeError) as exc:
+            raise GuidanceResponseError("Invalid JSON response") from exc
         fields = ["summary", "executive_summary", "primary_concerns", "interview_prompts"]
-        if any(not isinstance(data.get(f), str) or not data[f].strip() for f in fields):
-            raise ValueError("Incomplete guidance")
+        if not isinstance(data, dict) or any(not isinstance(data.get(f), str) or not data[f].strip() for f in fields):
+            raise GuidanceResponseError("Incomplete guidance")
         if not isinstance(data.get("actions"), list) or len(data["actions"]) != 3 or any(
             not isinstance(a, str) or not a.strip() or len(a) > 1000 for a in data["actions"]
         ):
-            raise ValueError("Invalid action plan")
+            raise GuidanceResponseError("Invalid action plan")
         briefing = {f: data[f] for f in fields[1:]}
         briefing["raw_text"] = "\n\n".join(briefing.values())
         return {"summary": data["summary"], "actions": data["actions"], "briefing": briefing,
                 "source": "Google Gemini", "online_requested": True, "fallback": False}
-    except Exception:
-        result.update(fallback=True, fallback_reason="Online guidance was unavailable; local guidance is ready.")
+    except Exception as exc:
+        category, reason, status = guidance_error(exc)
+        # Do not log provider messages, API keys, prompts, responses, or exception traces.
+        safe_model = model_name if re.fullmatch(r"(?:models/)?gemini-[a-zA-Z0-9._-]{1,80}", model_name) else "invalid-model-setting"
+        logger.warning("Gemini guidance failed: category=%s status=%s model=%s error_type=%s",
+                       category, status, safe_model, type(exc).__name__)
+        result.update(fallback=True, fallback_reason=reason + " Local guidance is shown instead.",
+                      failure_category=category)
         return result
 
 
